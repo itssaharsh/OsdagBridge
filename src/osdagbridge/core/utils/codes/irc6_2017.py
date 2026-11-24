@@ -927,8 +927,10 @@ class IRC6_2017:
                 wheel_load = IRC6_2017.cl_204_1_ClassA_vehicle()['wheel_loads']
                 braking_force_1 = 0.20 * sum(wheel_load)  # t
             if lane > 2:
+                # Cl. 211.2(b): 5 % of the load on each lane in excess of two,
+                # so this part accumulates over the extra lanes.
                 wheel_load = IRC6_2017.cl_204_1_Class70R_vehicle_wheel()['wheel_loads']
-                braking_force_2 = 0.05 * sum(wheel_load)  # t
+                braking_force_2 += 0.05 * sum(wheel_load)  # t
             
             total_braking_force = braking_force_1 + braking_force_2
         return round(total_braking_force, 3)
