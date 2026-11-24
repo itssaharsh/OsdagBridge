@@ -27,12 +27,14 @@ def test_cl_208_3_without_vehicle_type_is_unchanged_for_existing_callers():
 
 
 def test_live_load_table_shows_different_factors_for_wheeled_and_tracked():
+    # No carriageway width: no vehicle is matched to the analysis, so every row
+    # shows the IRC 6 Cl. 208.3 value for its vehicle type.
     tex = _live_load_tables({KEY_SPAN: 30, KEY_LL_IRC_70R_WHEELED: True,
-                             KEY_LL_IRC_AA_WHEELED: True, KEY_LL_IRC_70R_TRACKED: True}, [], "", "")
+                             KEY_LL_IRC_AA_WHEELED: True, KEY_LL_IRC_70R_TRACKED: True})
     rows = {line.split("&")[0].strip(): line.split("&")[2].strip()
             for line in tex.splitlines() if line.startswith("Class ")}
-    assert rows["Class 70R (Wheeled)"] == rows["Class AA (Wheeled)"] == "1.207"
-    assert rows["Class 70R (Tracked)"] == "1.100"
+    assert rows["Class 70R Wheeled"] == rows["Class AA Wheeled"] == "1.207"
+    assert rows["Class 70R Tracked"] == "1.100"
 
 
 def test_long_project_name_is_shortened_in_the_header():
@@ -52,7 +54,7 @@ def test_charts_leave_matplotlib_global_state_alone(tmp_path):
     assert dict(matplotlib.rcParams) == rc
 
 
-def test_non_finite_values_are_drawn_as_not_available(tmp_path):
+def test_nan_values_are_drawn_as_not_available(tmp_path):
     points = [report_charts.URPoint("Steel Plate Girders", "Moment", 0.8),
               report_charts.URPoint("Steel Plate Girders", "Shear", math.inf),
               report_charts.URPoint("End Diaphragms", "Moment", math.nan)]

@@ -28,7 +28,7 @@ def test_header_is_repeated_on_every_page():
     assert out.count(r"\textbf{Girder} & \textbf{Check}") == 2  # first head + continued head
     assert r"\endfirsthead" in out and r"\endhead" in out
     assert r"\caption{\textbf{Stiffener Checks}}\\" in out
-    assert r"\caption[]{\textbf{Stiffener Checks} (continued)}\\" in out
+    assert r"\caption[]{\textbf{Stiffener Checks}~(continued)}\\" in out
     assert r"\multicolumn{3}{r}{\continuednote}\\" in out
 
 
