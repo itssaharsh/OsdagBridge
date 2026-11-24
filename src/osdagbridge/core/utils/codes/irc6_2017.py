@@ -520,16 +520,42 @@ class IRC6_2017:
         return round(IM, 3)
     
     @staticmethod
-    def cl_208_3_impact_factor(span):
+    def cl_208_3_impact_factor(span, tracked=None):
         """
         Returns the impact factor (IM) for Class AA and Class 70R loading 
         according to IRC:6-2017 Clause 208.3.
 
         Parameters:
             span (float): span in metres
+            tracked (bool | None): True for tracked vehicles (70R tracked,
+                AA tracked), False for wheeled ones (70R wheeled, 70R bogie,
+                AA wheeled). For steel bridges, Clause 208.3 gives:
+                  span < 9 m:  tracked 25 % up to 5 m, reducing linearly to
+                               10 % at 9 m; wheeled 25 %
+                  span >= 9 m: tracked 10 % for all spans; wheeled 25 % up
+                               to 23 m, beyond that as Fig. 5, 9 / (13.5 + L)
+                               (L capped at 45 m, as in cl_208_2_impact_factor).
+                None keeps the earlier behaviour for existing callers: it
+                tests KEY_VEHICLE[1], a non-empty constant, so it always
+                returns the tracked value.
         Returns:
             float: impact factor (IM)
         """
+        if tracked is not None:
+            span = float(span)
+            if tracked:
+                if span <= 5.0:
+                    IM = 0.25
+                elif span < 9.0:
+                    IM = 0.25 - 0.15 * (span - 5.0) / 4.0
+                else:
+                    IM = 0.10
+            elif span <= 23.0:
+                IM = 0.25
+            else:
+                IM = 9.0 / (13.5 + min(span, 45.0))
+            return round(IM, 3)
+
         if span < 9.0: #span less than 9 m
             if KEY_VEHICLE[1]: # Class70R(T)
                 if span < 5.0:
@@ -891,6 +917,11 @@ class IRC6_2017:
         Returns:
             float: Braking force in t (rounded to 3 decimal places)
         """
+        # Both parts must start at zero: a one- or two-lane bridge never sets
+        # braking_force_2, which used to raise NameError (shown as "N/A" in the report).
+        braking_force_1 = 0.0
+        braking_force_2 = 0.0
+        total_braking_force = 0.0
         for lane in range(1, design_lanes + 1):
             if lane == 1 or lane == 2:
                 wheel_load = IRC6_2017.cl_204_1_ClassA_vehicle()['wheel_loads']
