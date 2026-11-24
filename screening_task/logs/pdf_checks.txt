@@ -1,12 +1,27 @@
+PDF checks (python tools/<check>.py <pdf>), run in screening_task/ on the headless reports.
+Report_Before.pdf was built with the dev geometry (1in bottom margin), so check_footer.py
+gets --bottom-margin 1in for it; Report_After.pdf uses the default (1.2in, styles.PAGE).
+
 == Report_Before.pdf
+$ python tools/check_footer.py Report_Before.pdf --bottom-margin 1in
+body text below the text block: [(28, 'G4')]
+text right of the text block: [(4, 'x'), (4, '22'), (4, '22'), (4, 'Normal'), (4, '(Girder)'), (8, 'Symmetry'), (8, 'Symmetric'), (8, 'Symmetric'), (8, 'Symmetric'), (8, 'Symmetric'), (8, 'mm'), (8, 'mm'), (8, 'mm'), (8, 'mm'), (8, 'Flange'), (8, '(b'), (8, 'bf'), (8, ','), (16, 'Supports'), (16, 'Right')] (267 words)
 labels in footer: [(28, 'G4')]
+$ python tools/check_heads.py Report_Before.pdf
+pages starting with table rows but no head: [(15, 'SLS-06 DL(1.00) + SIDL(1.20/1.00) + LL(0.20) + WL(0.50) +'), (21, 'Gross Area, A (cm ) 387.0'), (22, 'Moment of Inertia, I (cm ) 1881957.85'), (24, 'q √'), (25, 'Utilization Ratio, V /V 0.40 PASS'), (28, 'LTB Resistance, χ M /γ 7986.44 kN-m —'), (29, 'Intermediate Stiffener Thickness 21.1'), (30, 'Local Crushing 378.79 kN 483.79 kN PASS'), (43, 'Transverse Shear — — — —')]
+$ python tools/check_tables2.py Report_Before.pdf
 doubled heads: none
+$ python tools/check_orphans.py Report_Before.pdf
 orphaned heads: none
+
 == Report_After.pdf
+$ python tools/check_footer.py Report_After.pdf
+body text below the text block: none
+text right of the text block: none 
 labels in footer: none
+$ python tools/check_heads.py Report_After.pdf
+pages starting with table rows but no head: none
+$ python tools/check_tables2.py Report_After.pdf
 doubled heads: none
-orphaned heads: none
-== Report_After_GUI.pdf
-labels in footer: none
-doubled heads: none
+$ python tools/check_orphans.py Report_After.pdf
 orphaned heads: none

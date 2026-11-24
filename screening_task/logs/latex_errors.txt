@@ -1,9 +1,21 @@
-LaTeX error lines (lines starting with '!') in the pdflatex log
-before (dev d74f56d): 139
-after  (this branch): 0
+Counts from the pdflatex logs (logs/pdflatex_before.txt, logs/pdflatex_after.txt) of the
+headless reports: make_report.py on baseline_30m.osi, dev (d74f56d) vs this branch.
+
+                                                       before    after
+LaTeX errors (lines starting with '!')                    139        0
+Overfull \hbox warnings                                    59        0
+Overfull \vbox warnings                                     2        0
+Underfull \hbox / \vbox warnings                           57        0
+fancyhdr '\headheight is too small' warnings               50        0
+Pages                                                      51       58
 
 Distinct errors before:
      46 ! Misplaced \omit.
      46 ! Misplaced \noalign.
      46 ! Extra alignment tab has been changed to \cr.
       1 ! LaTeX Error: Unicode character ≤ (U+2264)
+
+Longtable heads, counted in the generated .tex (a 'repeated head' has a non-empty
+block between \endfirsthead and \endhead, or an \endhead without \endfirsthead):
+Report_Before.tex: longtables 49, repeated head 1 (with '(continued)' caption 0), empty continued head 1, 'Continued on next page' foot 0
+Report_After.tex: longtables 51, repeated head 51 (with '(continued)' caption 51), empty continued head 0, 'Continued on next page' foot 51
