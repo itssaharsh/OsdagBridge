@@ -4,6 +4,7 @@ from osdagbridge.core.utils.common import (
     KEY_MP_GIRDER_DEPTH,
     KEY_TS_NO_OF_GIRDERS
 )
+from osdagbridge.core.reports.styles import CAPTION, FIGURES
 
 
 def _tex(value):
@@ -76,10 +77,23 @@ def get_girder_entries(input_dict):
     return entries
 
 
-def _fig_or_placeholder(path, caption, width=r'0.9\textwidth'):
+def _placeholder_box(text, width=None):
+    """Framed box shown instead of a figure whose image is missing.
+
+    It ends with \\par, so two placeholders never share a line (two boxes of
+    0.97 of the text width side by side ran off the page in Chapter 4).
+    """
+    width = width or FIGURES["placeholder_width"]
+    return (r'\noindent\fbox{\parbox{' + width + '}{' + '\n'
+            r'\textit{[ PLACEHOLDER: ' + text + r' ]}' + '\n'
+            r'}}\par')
+
+
+def _fig_or_placeholder(path, caption, width=None):
     """Embed figure if path is provided (file already copied to assets), else show placeholder box.
     path is the relative path as pdflatex will see it (e.g. 'assets/plan.png').
     """
+    width = width or FIGURES["summary_width"]
     if path:
         p = path.replace('\\', '/')
         return (r'\begin{figure}[H]' + '\n'
@@ -89,30 +103,34 @@ def _fig_or_placeholder(path, caption, width=r'0.9\textwidth'):
                 r'\end{figure}')
     return (r'\begin{figure}[H]' + '\n'
             r'\centering' + '\n'
-            r'\fbox{\parbox{0.97\textwidth}{' + '\n'
-            r'\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
-            r'}}' + '\n'
+            + _placeholder_box(caption) + '\n'
             r'\caption*{' + caption + '}\n'
             r'\end{figure}')
 
-def _fig_embed(path, caption, width=r'\textwidth', height=None):
-    """Embed a real figure when path is provided (already copied); otherwise use an fbox placeholder."""
+
+def _fig_embed(path, caption, width=r'\textwidth', height=None, label=None, numbered=False):
+    """Embed a figure from ``path`` (relative to the LaTeX build folder).
+
+    ``numbered=True`` gives a numbered caption (\\caption, "Figure 5.1") that
+    can carry a ``label`` for \\ref; otherwise the caption is unnumbered
+    (\\caption*), as for the analysis plots. Without a path an fbox placeholder
+    is shown. Gaps and the caption font come from styles.FIGURES / CAPTION.
+    """
     if path:
         p = path.replace('\\', '/')
         opts = 'width=' + width
         if height:
             opts += ',height=' + height + ',keepaspectratio'
+        cap = (r'\caption{' if numbered else r'\caption*{') + caption + '}'
+        if numbered and label:
+            cap += r'\label{' + label + '}'
         return (r'\begin{figure}[H]' + '\n'
-                r'\vspace{-0.5em}' + '\n'
+                r'\captionsetup{font=' + CAPTION["figure_font"] + '}\n'
+                r'\vspace{' + FIGURES["embed_top_gap"] + '}\n'
                 r'\centering' + '\n'
                 r'\includegraphics[' + opts + ']{' + p + '}\n'
-                r'\vspace{0.5em}' + '\n'
-                r'\caption*{\small ' + caption + '}\n'
-                r'\vspace{-0.5em}' + '\n'
+                r'\vspace{' + FIGURES["embed_caption_gap"] + '}\n'
+                + cap + '\n'
+                r'\vspace{' + FIGURES["embed_bottom_gap"] + '}\n'
                 r'\end{figure}')
-    # fbox placeholder — matches template exactly
-    return (r'\noindent\fbox{\parbox{0.97\textwidth}{' + '\n'
-            r'\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
-            r'}}')
-
-
+    return _placeholder_box(caption)

@@ -1,6 +1,6 @@
 """Charts embedded in the design report (Section 5.5 and Chapter 7).
 
-Each function draws one figure with matplotlib (Agg backend, no display
+Each function draws one figure with matplotlib (Agg canvas, no display
 needed), saves it as a vector PDF next to the other report images, and
 returns the path for ``\\includegraphics``. Colours, fonts and sizes come from
 ``styles.CHART``.
@@ -11,12 +11,18 @@ returns the path for ``\\includegraphics``. Colours, fonts and sizes come from
 * ``element_summary_chart``: the governing (highest) UR of each element.
 * ``steel_tonnage_chart`` and ``concrete_rebar_chart``: material quantities
   from the Chapter 7 bill of materials.
+
+UR axes stop at ``CHART['ur_axis_cap']``: a larger UR, or an infinite one
+(zero capacity), is drawn as a hatched failing bar up to the cap and labelled
+with its real value, so one extreme value does not flatten the other bars.
+Value labels are placed so that they never sit on the UR = 1.0 line.
 """
 
 from __future__ import annotations
 
 import math
 import os
+import textwrap
 from dataclasses import dataclass
 
 # The object-oriented API with an Agg canvas is used instead of pyplot: the
@@ -36,7 +42,7 @@ ELEMENTS = ("Steel Plate Girders", "Concrete Deck Slab", "Cross Bracing", "End D
 class URPoint:
     element: str  # one of ELEMENTS
     check: str    # short label, e.g. "Moment"
-    ur: float | None  # None when the check is not available
+    ur: float | None  # None when the check is not available; inf for zero capacity
 
 
 def _figure(width: float, height: float) -> Figure:
@@ -63,12 +69,23 @@ def _axes_style(ax) -> None:
 
 
 def _finite(value) -> float | None:
-    """A UR or quantity that can be drawn: a finite, non-negative number, else None."""
+    """A quantity that can be drawn: a finite, non-negative number, else None."""
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and number >= 0 else None
+
+
+def _ur_value(value) -> float | None:
+    """A UR that can be drawn: a non-negative number, ``inf`` included (zero capacity)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or number < 0:
+        return None
+    return number
 
 
 def _bar_colors(values):
@@ -88,46 +105,94 @@ def tex_path(path: str, out_dir: str) -> str:
     """Path of a chart for \\includegraphics, relative to the LaTeX build folder.
 
     The report writes charts into ``<build folder>/images`` and runs pdflatex in
-    the build folder, so ``images/<name>.pdf`` always resolves. An absolute path
-    can break pdflatex: a relative build folder, or a Windows temp folder with a
-    "~" short name (``C:/Users/JOHNDO~1/...``), where "~" is a LaTeX active
-    character.
+    the build folder, so ``images/<name>.pdf`` always resolves, also when the
+    build folder is given as a relative path.
     """
     return os.path.basename(os.path.normpath(out_dir)) + "/" + os.path.basename(path)
 
 
+def _ur_label(value: float) -> str:
+    if math.isinf(value):
+        return "∞"
+    return f"{value:.2f}"
+
+
+def _wrap(label: str) -> str:
+    return "\n".join(textwrap.wrap(label, CHART["label_wrap_chars"])) or label
+
+
+def _set_check_labels(ax, labels) -> None:
+    """x labels: wrapped and level for up to 4 checks, slanted (not wrapped) for more.
+
+    Wrapped labels must stay level: slanted multi-line labels run into their
+    neighbours. Beyond 8 checks the labels are steeper and smaller.
+    """
+    n = len(labels)
+    if n <= 4:
+        ax.set_xticklabels([_wrap(label) for label in labels], rotation=0, ha="center",
+                           fontfamily=CHART["font_family"], fontsize=CHART["font_size"])
+        return
+    angle, size = (30, CHART["font_size"]) if n <= 8 else (60, CHART["font_size"] - 1)
+    ax.set_xticklabels(labels, rotation=angle, ha="right", rotation_mode="anchor",
+                       fontfamily=CHART["font_family"], fontsize=size)
+
+
+def _label_position(height: float, top: float):
+    """(y, va, inside) for a bar's value label so that it stays clear of UR = 1.0.
+
+    The label normally sits just above the bar. When that would put it on the
+    UR = 1.0 line, it goes inside a tall enough bar, otherwise just above the
+    line.
+    """
+    pad, text_h = 0.015 * top, 0.075 * top
+    y = height + pad
+    if y - pad <= UR_LIMIT <= y + text_h + pad:
+        if height - pad - text_h >= 0.05 * top:
+            return height - pad, "top", True
+        return UR_LIMIT + 2 * pad, "bottom", False
+    return y, "bottom", False
+
+
 def _ur_panel(ax, labels, values, title):
-    values = [_finite(v) for v in values]
-    heights = [v if v is not None else 0.0 for v in values]
+    values = [_ur_value(v) for v in values]
+    cap = CHART["ur_axis_cap"]
+    drawable = [v for v in values if v is not None]
+    peak = max([UR_LIMIT] + [min(v, cap) for v in drawable])
+    top = peak * 1.22
+    heights = [0.0 if v is None else min(v, cap) for v in values]
+    capped = [v is not None and v > cap for v in values]
     bars = ax.bar(range(len(labels)), heights, color=_bar_colors(values),
-                  edgecolor=CHART["edge_color"], linewidth=0.5, zorder=3)
-    ax.axhline(UR_LIMIT, color=CHART["limit_color"], linestyle="--", linewidth=1.2, zorder=4,
-               label=f"UR = {UR_LIMIT:.1f}")
-    top = max([UR_LIMIT] + [v for v in values if v is not None]) * 1.18
+                  edgecolor=CHART["edge_color"], linewidth=CHART["bar_edge_width"], zorder=3)
+    for bar, is_capped in zip(bars, capped):
+        if is_capped:
+            bar.set_hatch(CHART["ur_cap_hatch"])
+    ax.axhline(UR_LIMIT, color=CHART["limit_color"], linestyle="--", linewidth=CHART["limit_line_width"],
+               zorder=4, label=f"UR = {UR_LIMIT:.1f}")
     ax.set_ylim(0, top)
     ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30, ha="right")
     ax.set_ylabel("Utilization Ratio")
     ax.set_title(title, fontweight="bold")
     ax.grid(axis="y", color=CHART["grid_color"], zorder=0)
-    for bar, value in zip(bars, values):
-        text = "n/a" if value is None else f"{value:.2f}"
-        y = bar.get_height() if value is not None else 0.0
-        ax.text(bar.get_x() + bar.get_width() / 2, y + top * 0.015, text,
-                ha="center", va="bottom", fontsize=CHART["font_size"] - 1,
-                fontfamily=CHART["font_family"])
+    for bar, value, height in zip(bars, values, heights):
+        text = "n/a" if value is None else _ur_label(value)
+        y, va, inside = _label_position(height, top)
+        ax.text(bar.get_x() + bar.get_width() / 2, y, text, ha="center", va=va,
+                fontsize=CHART["font_size"] - 1, fontfamily=CHART["font_family"],
+                color="white" if inside else CHART["edge_color"],
+                fontweight="bold" if inside else "normal", zorder=5)
     _axes_style(ax)
+    _set_check_labels(ax, labels)  # after _axes_style, which resets the tick label size
 
 
 def utilization_chart(points: list[URPoint], out_dir: str, name: str = "ur_by_element") -> str | None:
     """2 x 2 panels, one per primary element; returns None if there is no UR at all."""
-    if not any(_finite(p.ur) is not None for p in points):
+    if not any(_ur_value(p.ur) is not None for p in points):
         return None
-    fig = _figure(CHART["figure_width_in"], 6.4)
+    fig = _figure(CHART["figure_width_in"], 6.6)
     axes = fig.subplots(2, 2)
     for ax, element in zip(axes.flat, ELEMENTS):
         rows = [p for p in points if p.element == element]
-        if not rows or all(_finite(p.ur) is None for p in rows):
+        if not rows or all(_ur_value(p.ur) is None for p in rows):
             ax.set_title(element, fontweight="bold")
             ax.text(0.5, 0.5, "No utilization checks\navailable for this element",
                     ha="center", va="center", transform=ax.transAxes, color=CHART["edge_color"],
@@ -153,7 +218,7 @@ def element_summary_chart(points: list[URPoint], out_dir: str, name: str = "ur_g
     """Governing (maximum) UR of each primary element."""
     governing = []
     for element in ELEMENTS:
-        values = [_finite(p.ur) for p in points if p.element == element]
+        values = [_ur_value(p.ur) for p in points if p.element == element]
         values = [v for v in values if v is not None]
         governing.append(max(values) if values else None)
     if all(v is None for v in governing):
@@ -168,17 +233,13 @@ def element_summary_chart(points: list[URPoint], out_dir: str, name: str = "ur_g
     return _save(fig, out_dir, name)
 
 
-def _number(value) -> float | None:
-    return _finite(value)
-
-
 def steel_tonnage_chart(quantities: dict, out_dir: str, name: str = "steel_tonnage") -> str | None:
     """Structural steel weight (MT) of girders, cross bracing and end diaphragms."""
-    girders = _number(quantities.get("steel_girders_wt_total"))
-    bracing_parts = [_number(quantities.get(k)) for k in
+    girders = _finite(quantities.get("steel_girders_wt_total"))
+    bracing_parts = [_finite(quantities.get(k)) for k in
                      ("bracing_top_wt_total", "bracing_bot_wt_total", "bracing_diag_wt_total")]
     bracing = sum(v for v in bracing_parts if v is not None) if any(v is not None for v in bracing_parts) else None
-    diaphragms = _number(quantities.get("end_diaphragm_wt_total"))
+    diaphragms = _finite(quantities.get("end_diaphragm_wt_total"))
     labels = ["Girders", "Cross Bracing", "End Diaphragms"]
     values = [girders, bracing, diaphragms]
     if all(v is None for v in values):
@@ -187,7 +248,8 @@ def steel_tonnage_chart(quantities: dict, out_dir: str, name: str = "steel_tonna
     ax = fig.subplots()
     colors = [CHART["steel_color"] if v is not None else CHART["missing_color"] for v in values]
     heights = [v or 0.0 for v in values]
-    bars = ax.bar(labels, heights, color=colors, edgecolor=CHART["edge_color"], linewidth=0.5, zorder=3)
+    bars = ax.bar(labels, heights, color=colors, edgecolor=CHART["edge_color"],
+                  linewidth=CHART["bar_edge_width"], zorder=3)
     top = max(heights) * 1.2 or 1.0
     ax.set_ylim(0, top)
     for bar, value in zip(bars, values):
@@ -195,48 +257,55 @@ def steel_tonnage_chart(quantities: dict, out_dir: str, name: str = "steel_tonna
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + top * 0.02, text,
                 ha="center", va="bottom", fontsize=CHART["font_size"] - 1,
                 fontfamily=CHART["font_family"])
+    included = [label.lower() for label, value in zip(labels, values) if value is not None]
     total = sum(v for v in values if v is not None)
     ax.set_ylabel("Weight (MT)")
-    ax.set_title(f"Structural Steel Tonnage (total {total:.2f} MT)", fontweight="bold")
+    ax.set_title(f"Structural Steel Tonnage\n({' + '.join(included)}: {total:.2f} MT)", fontweight="bold")
     ax.grid(axis="y", color=CHART["grid_color"], zorder=0)
     _axes_style(ax)
     fig.tight_layout()
     return _save(fig, out_dir, name)
 
 
+def _concrete_mass(quantities: dict, volume: float | None) -> float | None:
+    """Deck concrete mass in MT: Table 7.1's weight, else volume x IRC 6 Cl. 203 unit weight."""
+    mass = _finite(quantities.get("concrete_deck_wt_total"))
+    if mass is not None or volume is None:
+        return mass
+    from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
+    return volume * IRC6_2017.cl_203_dead_load()["concrete_cement_reinforced"]  # t/m3
+
+
 def concrete_rebar_chart(quantities: dict, out_dir: str, name: str = "concrete_vs_rebar") -> str | None:
-    """Deck concrete volume (m3) next to reinforcement weight (MT), each on its own axis."""
-    concrete = _number(quantities.get("concrete_deck_vol_total"))
-    rebar = _number(quantities.get("rebar_deck_wt_total"))
+    """Deck concrete and reinforcement as mass (MT) on one axis; the steel ratio (kg/m3) in the title."""
+    volume = _finite(quantities.get("concrete_deck_vol_total"))
+    concrete = _concrete_mass(quantities, volume)
+    rebar = _finite(quantities.get("rebar_deck_wt_total"))
     if concrete is None and rebar is None:
         return None
     fig = _figure(CHART["figure_width_in"] * 0.62, 3.2)
-    ax_c = fig.subplots()
-    ax_r = ax_c.twinx()
-    ax_r.spines["right"].set_visible(True)
-    c_val, r_val = concrete or 0.0, rebar or 0.0
-    bc = ax_c.bar([0], [c_val], width=0.5, color=CHART["concrete_color"],
-                  edgecolor=CHART["edge_color"], linewidth=0.5, zorder=3)
-    br = ax_r.bar([1], [r_val], width=0.5, color=CHART["rebar_color"],
-                  edgecolor=CHART["edge_color"], linewidth=0.5, zorder=3)
-    ax_c.set_ylim(0, (c_val * 1.25) or 1.0)
-    ax_r.set_ylim(0, (r_val * 1.25) or 1.0)
-    ax_c.set_xticks([0, 1])
-    ax_c.set_xticklabels(["Concrete (deck)", "Reinforcement"])
-    ax_c.set_ylabel("Concrete volume (m$^3$)")
-    ax_r.set_ylabel("Reinforcement weight (MT)")
-    ax_c.text(0, c_val * 1.03, "n/a" if concrete is None else f"{c_val:.2f} m$^3$", ha="center", va="bottom",
-              fontsize=CHART["font_size"], fontfamily=CHART["font_family"])
-    ax_r.text(1, r_val * 1.03, "n/a" if rebar is None else f"{r_val:.2f} MT", ha="center", va="bottom",
-              fontsize=CHART["font_size"], fontfamily=CHART["font_family"])
-    title = "Deck Concrete vs Reinforcement"
-    if concrete and rebar:
-        title += f"\n({rebar * 1000 / concrete:.0f} kg of steel per m$^3$ of concrete)"
-    ax_c.set_title(title, fontweight="bold")
-    ax_c.grid(axis="y", color=CHART["grid_color"], zorder=0)
-    _ = (bc, br)
-    _axes_style(ax_c)
-    _axes_style(ax_r)
-    ax_r.spines["right"].set_visible(True)
+    ax = fig.subplots()
+    values = [concrete, rebar]
+    heights = [v or 0.0 for v in values]
+    colors = [CHART["concrete_color"] if concrete is not None else CHART["missing_color"],
+              CHART["rebar_color"] if rebar is not None else CHART["missing_color"]]
+    bars = ax.bar(["Concrete (deck)", "Reinforcement"], heights, width=CHART["pair_bar_width"], color=colors,
+                  edgecolor=CHART["edge_color"], linewidth=CHART["bar_edge_width"], zorder=3)
+    top = max(heights) * 1.25 or 1.0
+    ax.set_ylim(0, top)
+    texts = ["n/a" if concrete is None else f"{concrete:.2f} MT"
+             + (f"\n({volume:.2f} m$^3$)" if volume is not None else ""),
+             "n/a" if rebar is None else f"{rebar:.2f} MT"]
+    for bar, text in zip(bars, texts):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + top * 0.02, text,
+                ha="center", va="bottom", fontsize=CHART["font_size"] - 1,
+                fontfamily=CHART["font_family"])
+    ax.set_ylabel("Mass (MT)")
+    title = "Deck Concrete vs Reinforcement (mass)"
+    if volume and rebar is not None:
+        title += f"\nReinforcement ratio {rebar * 1000 / volume:.0f} kg/m$^3$ of concrete"
+    ax.set_title(title, fontweight="bold")
+    ax.grid(axis="y", color=CHART["grid_color"], zorder=0)
+    _axes_style(ax)
     fig.tight_layout()
     return _save(fig, out_dir, name)

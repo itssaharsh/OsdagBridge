@@ -6,6 +6,7 @@ from osdagbridge.core.utils.common import (
     KEY_SD_DEFL_TOTAL,
 )
 from osdagbridge.core.reports.report_utils import _tex, _fig_embed
+from osdagbridge.core.reports.styles import FIGURES, status_cell
 
 if TYPE_CHECKING:
     from .report_generator import ReportDataBridge
@@ -73,8 +74,30 @@ def ch4_analysis(asum, fig_paths, bridge: "ReportDataBridge", span_m: float):
     _total_str       = f"{_total_mm:.3f} mm" if _total_mm is not None else "---"
     _allow_live_str  = f"L/800 = {_allow_live_mm:.1f} mm"
     _allow_total_str = f"L/600 = {_allow_total_mm:.1f} mm"
-    _live_status     = ("PASS" if _live_mm  <= _allow_live_mm  else r"\statusfail{FAIL}") if _live_mm  is not None else "---"
-    _total_status    = ("PASS" if _total_mm <= _allow_total_mm else r"\statusfail{FAIL}") if _total_mm is not None else "---"
+    _live_status     = status_cell(_live_mm <= _allow_live_mm if _live_mm is not None else None)
+    _total_status    = status_cell(_total_mm <= _allow_total_mm if _total_mm is not None else None)
+
+    # Table 4.2: the largest reaction at each support over the load cases of
+    # Table 4.1 (same source, rxn_summary), with the case that produces it.
+    def _max_reaction(side):
+        best = None
+        for lc, rxn_d in rxn_summary.items():
+            try:
+                val = float((rxn_d or {}).get(side))
+            except (TypeError, ValueError):
+                continue
+            if best is None or abs(val) > abs(best[0]):
+                best = (val, lc)
+        return best
+
+    reaction_rows = []
+    for label, side in (("Left support", "left_kN"), ("Right support", "right_kN")):
+        best = _max_reaction(side)
+        if best is not None:
+            reaction_rows.append(label + r" & " + _fmt(best[0]) + r" & " + _tex(best[1]) + r" \\[\rowpad]")
+    if not reaction_rows:
+        reaction_rows.append(r"\multicolumn{3}{|c|}{Support reactions were not computed} \\[\rowpad]")
+    reaction_body = "\n\\hline\n".join(reaction_rows)
     return r"""
 \chapter{Analysis Results}
 
@@ -87,22 +110,22 @@ A grillage model was used for structural analysis. The deck is idealized as a gr
 \tallrows
 
 \begin{longtable}{|
->{\centering\arraybackslash}p{3.1cm}|
+>{\centering\arraybackslash}p{2.9cm}|
 >{\centering\arraybackslash}p{1.7cm}|
->{\centering\arraybackslash}p{1.2cm}|
 >{\centering\arraybackslash}p{1.3cm}|
->{\centering\arraybackslash}p{1.7cm}|
->{\centering\arraybackslash}p{1.2cm}|
+>{\centering\arraybackslash}p{1.3cm}|
+>{\centering\arraybackslash}p{1.6cm}|
+>{\centering\arraybackslash}p{1.3cm}|
 >{\centering\arraybackslash}p{1.3cm}|
 >{\centering\arraybackslash}p{1.6cm}|
 >{\centering\arraybackslash}p{1.6cm}|}
 
 \caption{\textbf{Summary of Maximum Demands}}\\
 \hline
-\multirow{2}{*}{\makecell{\textbf{Load}\\\textbf{Case/}\\\textbf{Comb.}}}
+\multirow{2}{*}{\makecell{\textbf{Load Case/}\\\textbf{Comb.}}}
 & \multicolumn{3}{c|}{\textbf{Bending Moment}}
 & \multicolumn{3}{c|}{\textbf{Shear Force}}
-& \multicolumn{2}{c|}{\textbf{Reaction at Supports}}\\
+& \multicolumn{2}{c|}{\makecell{\textbf{Reaction at}\\\textbf{Supports (kN)}}}\\
 \cline{2-9}
 
 & \makecell{\textbf{Max}\\\textbf{(kNm)}}
@@ -117,10 +140,10 @@ A grillage model was used for structural analysis. The deck is idealized as a gr
 \endfirsthead
 
 \hline
-\multirow{2}{*}{\makecell{\textbf{Load}\\\textbf{Case/}\\\textbf{Comb.}}}
+\multirow{2}{*}{\makecell{\textbf{Load Case/}\\\textbf{Comb.}}}
 & \multicolumn{3}{c|}{\textbf{Bending Moment}}
 & \multicolumn{3}{c|}{\textbf{Shear Force}}
-& \multicolumn{2}{c|}{\textbf{Reaction at Supports}}\\
+& \multicolumn{2}{c|}{\makecell{\textbf{Reaction at}\\\textbf{Supports (kN)}}}\\
 \cline{2-9}
 
 & \makecell{\textbf{Max}\\\textbf{(kNm)}}
@@ -141,24 +164,21 @@ A grillage model was used for structural analysis. The deck is idealized as a gr
 \endgroup
 
 \tablegap
-\begin{longtable}{|>{\centering\arraybackslash}p{5.2cm}|>{\centering\arraybackslash}p{5.2cm}|>{\centering\arraybackslash}p{5.2cm}|}
+\begin{longtable}{|L{4.0cm}|C{4.0cm}|L{7.6cm}|}
 \caption{\textbf{Reactions at Supports}}
 \hline
-\textbf{Load Case} & \textbf{Left Support (kN)} & \textbf{Right Support (kN)} \\[\rowpad]
+\textbf{Support} & \textbf{Largest Reaction (kN)} & \textbf{Load Case / Combination} \\[\rowpad]
 \hline
- & """ + '' + r""" & """ + '' + r""" \\[\rowpad]
-\hline
- & """ + '' + r""" & """ + '' + r""" \\[\rowpad]
-\hline
- & """ + '' + r""" & """ + '' + r""" \\[\rowpad]
+""" + reaction_body + r"""
 \hline
 \end{longtable}
+\noindent\textit{Note: Largest absolute reaction at each support over the load cases of Table 4.1, which lists the reactions of every case.}
 
 \tablegap
 \begin{longtable}{|L{7cm}|p{8.5cm}|}
 \caption{\textbf{Deflection Summary (Live Load \& Total Load)}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Deflection due to Live Load, $\delta_{LL}$} & """ + _live_str + r""" \\[\rowpad]
 \hline
@@ -175,9 +195,10 @@ A grillage model was used for structural analysis. The deck is idealized as a gr
 \end{longtable}
 
 \tablegap
-\noindent
-""" + _fig_embed(fig_paths.get('bm_envelope'), 'Bending Moment Envelope (Envelope ULS): Max/min BM along span. X-axis: distance from left support (m). Y-axis: Bending Moment (kN-m).', width=r'0.75\textwidth') + r"""
-""" + _fig_embed(fig_paths.get('sf_envelope'), 'Shear Force Envelope (Envelope ULS): Max/min SF along span. X-axis: distance from left support (m). Y-axis: Shear Force (kN).', width=r'0.75\textwidth') + r"""
-""" + _fig_embed(fig_paths.get('defl_ll'), 'Vertical Deflection D$_y$ (1.0 LL): Maximum deflection along span. Load Case: 1.0 LL, Combination: $D_y$. Nodes shown. Isometric view.', width=r'0.75\textwidth') + r"""
+""" + _fig_embed(fig_paths.get('bm_envelope'), 'Bending Moment Envelope (Envelope ULS): Max/min BM along span. X-axis: distance from left support (m). Y-axis: Bending Moment (kN-m).', width=FIGURES['analysis_plot_width']) + r"""
+\smallgap
+""" + _fig_embed(fig_paths.get('sf_envelope'), 'Shear Force Envelope (Envelope ULS): Max/min SF along span. X-axis: distance from left support (m). Y-axis: Shear Force (kN).', width=FIGURES['analysis_plot_width']) + r"""
+\smallgap
+""" + _fig_embed(fig_paths.get('defl_ll'), 'Vertical Deflection D$_y$ (1.0 LL): Maximum deflection along span. Load Case: 1.0 LL, Combination: $D_y$. Nodes shown. Isometric view.', width=FIGURES['analysis_plot_width']) + r"""
 """
 

@@ -108,7 +108,6 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Literal
 
 from osdagbridge.core.utils.common import (
-    KEY_DESIGN_MODE,
     KEY_SPAN,
     KEY_TL_BRIDGE_TEMP_MAX,
     KEY_TL_BRIDGE_TEMP_MIN,
@@ -182,21 +181,14 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \usepackage{setspace}
 \usepackage{enumitem}
 \usepackage{caption}
-
-\captionsetup{
-    labelfont=bf,
-    justification=raggedright,
-    singlelinecheck=false,
-    format=plain
-}
+""" + styles.caption_setup() + r"""
 \usepackage{subcaption}
 \usepackage{multirow}
 \usepackage{colortbl}
 \usepackage{longtable}
-\setlength{\LTleft}{\fill}
-\setlength{\LTright}{\fill}
 \usepackage{titlesec}
 \usepackage{titletoc}
+""" + styles.chapter_heading_block() + r"""
 \usepackage{lastpage}
 \usepackage{makecell}
 \usepackage{etoolbox}
@@ -206,10 +198,10 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \numberwithin{figure}{chapter}
 """ + styles.latex_style_block() + "\n" + styles.header_footer_block(pn, jn, rd, rv) + r"""\pagestyle{main}
 \setstretch{""" + str(styles.PAGE["line_stretch"]) + r"""}
+\setlength{\emergencystretch}{""" + styles.PAGE["emergency_stretch"] + r"""}
 
 % Custom Commands
 \newcommand{\placeholder}[1]{\textit{\textless #1\textgreater}}
-\newcommand{\todo}[1]{\colorbox{yellow}{TODO: #1}}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
 \newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
@@ -222,10 +214,6 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \renewcommand{\sdstar}{\textsuperscript{*}\markSD{}}
 \AddToHook{shipout/before}{\global\boolfalse{hasSDonPage}}
 
-\title{\Large\textbf{OsdagBridge} \\ \normalsize Open Source Software for Steel Girder Bridge Design \\ \vspace{2cm} \large Design Report}
-\author{}
-\date{}
-
 \begin{document}
 """
 
@@ -235,39 +223,41 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def title_page(m, osdag_logo, org_logo):
+    tp = styles.TITLE_PAGE
     if osdag_logo:
         lhs = r'\includegraphics[width=\linewidth,keepaspectratio]{' + osdag_logo.replace('\\', '/') + r'}'
     else:
         lhs = r'\textit{(Osdag Logo)}'
 
     if org_logo:
-        rhs = r'\includegraphics[width=\linewidth,height=2.2cm,keepaspectratio]{' + org_logo.replace('\\', '/') + r'}'
+        rhs = (r'\includegraphics[width=\linewidth,height=' + tp['logo_right_height']
+               + r',keepaspectratio]{' + org_logo.replace('\\', '/') + r'}')
     else:
         rhs = r''
 
     logos_tex = r"""\noindent
-\begin{minipage}[c]{0.6\textwidth}
+\begin{minipage}[c]{""" + tp['logo_left_width'] + r"""}
 \raggedright
 """ + lhs + r"""
 \end{minipage}%
 \hfill
-\begin{minipage}[c]{0.35\textwidth}
+\begin{minipage}[c]{""" + tp['logo_right_width'] + r"""}
 \raggedleft
 """ + rhs + r"""
 \end{minipage}
-\\[1cm]
+\\[""" + tp['logo_gap'] + r"""]
 """
 
     return r"""
 \begin{titlepage}
 \thispagestyle{firstpage}
 \centering
-\vspace*{1.5cm}
+\vspace*{""" + tp['top_gap'] + r"""}
 """ + logos_tex + r"""
-{\Huge \textbf{OsdagBridge}}\\[0.3cm]
-{\large Open Source Software for Steel Girder Bridge Design}\\[1.5cm]
-{\Large Design Report}\\[1.5cm]
-\begin{tabular}{|L{4cm}|L{10cm}|}
+{""" + tp['title_size'] + r""" \textbf{OsdagBridge}}\\[""" + tp['title_gap'] + r"""]
+{""" + tp['subtitle_size'] + r""" Open Source Software for Steel Girder Bridge Design}\\[""" + tp['subtitle_gap'] + r"""]
+{""" + tp['doc_type_size'] + r""" Design Report}\\[""" + tp['doc_type_gap'] + r"""]
+\begin{tabular}{|L{""" + tp['info_label_width'] + r"""}|L{""" + tp['info_value_width'] + r"""}|}
 \hline
 \textbf{Project Name} & """ + _tex(m.project_name) + r""" \\
 \hline
@@ -289,6 +279,9 @@ def title_page(m, osdag_logo, org_logo):
 \hline
 \end{tabular}
 \end{titlepage}
+% The title page is page 1, so the page after it is page 2 ("Page N of M"
+% then matches the PDF page and hyperref gets no duplicate page.1 anchor).
+\setcounter{page}{2}
 """
 
 
@@ -297,36 +290,8 @@ def title_page(m, osdag_logo, org_logo):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def toc_section():
-    return r"""
-% Chapter / TOC Formatting
-\titleformat{\chapter}[block]
-  {\normalfont\Large\bfseries\centering}{\thechapter}{1em}{}
-\titlespacing*{\chapter}{0pt}{0pt}{10pt}
-\setcounter{tocdepth}{2}
-
-% TOC styling using titletoc
-\titlecontents{chapter}[1.5em]
-  {\normalfont\vspace{2pt}}
-  {\contentslabel{1.5em}}
-  {\hspace*{-1.5em}}
-  {\hfill\contentspage}
-
-\titlecontents{section}[3.8em]
-  {\normalfont}
-  {\contentslabel{2.3em}}
-  {\hspace*{-2.3em}}
-  {\hfill\contentspage}
-
-\titlecontents{subsection}[7.0em]
-  {\normalfont}
-  {\contentslabel{3.2em}}
-  {\hspace*{-3.2em}}
-  {\hfill\contentspage}
-
-\newpage
-\renewcommand{\contentsname}{\centering\Large\bfseries Table of Contents}
-\tableofcontents
-"""
+    """Table of contents; entry styles and spacing come from styles.TOC."""
+    return "\n" + styles.toc_block() + "\n"
 
 
 # =============================================================================
@@ -544,10 +509,7 @@ class ReportDataBridge:
         try:
             val = self._cb_osdag(pair, member, force_type).get("efficiency")
             if val is not None:
-                ur = float(val)
-                if ur <= 1.0:
-                    return r"\statuspass{PASS}"
-                return r"\statusfail{FAIL}"
+                return styles.status_cell(float(val) <= styles.UR_LIMIT)
         except (TypeError, ValueError):
             pass
         return ""
@@ -826,7 +788,8 @@ def generate_report(payload, request):
                     p = os.path.join(tmp_images, attr + '.png')
                     with open(p, 'wb') as fh:
                         fh.write(img_bytes)
-                    fig_paths[attr] = p.replace('\\', '/')
+                    # Relative to tmp_dir, where pdflatex runs (like the charts).
+                    fig_paths[attr] = 'images/' + attr + '.png'
             payload.figure_data.clear()  # bytes no longer needed — free RAM now
 
             # ── Write title-page logos into tmp_dir/assets (auto-deleted) ──
@@ -868,9 +831,10 @@ def generate_report(payload, request):
             # chapters are locked in the UI, so they are always present.
             secs = payload.options.sections
 
-            # Every chapter goes through finalize_tables(): longtable headers are
-            # repeated on each page and multirow groups are kept on one page
-            # (see latex_tables.py). Charts are drawn into tmp_images.
+            # Every chapter goes through finalize_tables() (latex_tables.py):
+            # longtable heads repeated on each page, multirow group labels
+            # top-aligned and short groups kept on one page, and every table
+            # scaled to the text width. Charts are drawn into tmp_images.
             chapters = []
             chapters.append(executive_summary(payload.inputs, payload.output_dict, fig_paths))
             chapters.append(ch1_project_info(payload.metadata))
@@ -886,24 +850,13 @@ def generate_report(payload, request):
                 chapters.append(ch6_drawings(fig_paths))
 
             chapters.append(ch7_quantities(payload.inputs, fig_dir=tmp_images))
+            chapters.append(ch8_design_log(payload.log_entries, payload.inputs))
             doc_parts.extend(finalize_tables(chapter) for chapter in chapters)
-
-            mode = str(payload.inputs.get(KEY_DESIGN_MODE, "Optimized")).strip().lower()
-            is_custom = mode in {"custom", "customized"}
-        
-
-            doc_parts.append(ch8_design_log(payload.log_entries, payload.inputs))
 
             doc_parts.append(references())
             doc_parts.append(r"\end{document}")
 
             full_tex = "\n".join(doc_parts)
-
-
-            # NOTE: longtable header repetition is handled per-table in each
-            # chapter file (e.g. \endfirsthead / \endhead).  No automatic
-            # post-processing is applied here to avoid mis-ordering captions
-            # and column headings.
 
             tmp_tex = os.path.join(tmp_dir, request.file_stem + '.tex')
             tmp_pdf = os.path.join(tmp_dir, request.file_stem + '.pdf')

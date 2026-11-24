@@ -1,19 +1,39 @@
+import logging
+
 from osdagbridge.core.reports.report_charts import concrete_rebar_chart, steel_tonnage_chart, tex_path
 from osdagbridge.core.reports.report_utils import _fig_embed
 from osdagbridge.core.reports.styles import FIGURES
 
+logger = logging.getLogger(__name__)
+
 
 def _quantity_charts(input_dict, fig_dir):
-    """Bar charts of the Table 7.1 quantities, drawn into fig_dir (Chapter 7 figures)."""
+    """Bar charts of the Table 7.1 quantities, drawn into fig_dir (Chapter 7 figures).
+
+    A chart that fails (matplotlib or disk error) is left out and logged; the
+    rest of the report is still produced.
+    """
     if not fig_dir:
         return ""
+    charts = [
+        (steel_tonnage_chart, "fig:steel-tonnage",
+         r"Structural steel tonnage from Table 7.1. The total covers the girders and the cross "
+         r"bracing; end diaphragms are not in the bill of materials yet, so their bar is marked "
+         r"``not in take-off''."),
+        (concrete_rebar_chart, "fig:concrete-rebar",
+         r"Deck concrete and reinforcement steel from Table 7.1, both as mass (MT) on one scale. "
+         r"The title gives the reinforcement ratio in kg of steel per m\textsuperscript{3} of concrete."),
+    ]
     parts = []
-    steel = steel_tonnage_chart(input_dict, fig_dir)
-    if steel:
-        parts.append(_fig_embed(tex_path(steel, fig_dir), r"Structural steel tonnage from Table 7.1. End diaphragms are shown only when the take-off includes them.", width=FIGURES["chart_width_half"]))
-    concrete = concrete_rebar_chart(input_dict, fig_dir)
-    if concrete:
-        parts.append(_fig_embed(tex_path(concrete, fig_dir), r"Deck concrete volume (left axis, m\textsuperscript{3}) against reinforcement steel weight (right axis, MT) from Table 7.1.", width=FIGURES["chart_width_half"]))
+    for draw, label, caption in charts:
+        try:
+            path = draw(input_dict, fig_dir)
+        except Exception as exc:  # a chart must never stop the report
+            logger.warning("quantity chart %s left out: %s", label, exc)
+            continue
+        if path:
+            parts.append(_fig_embed(tex_path(path, fig_dir), caption, width=FIGURES["chart_width_small"],
+                                    label=label, numbered=True))
     if not parts:
         return ""
     return "\n\\section{Quantity Charts}\n" + "\n".join(parts) + "\n"
@@ -25,11 +45,10 @@ def ch7_quantities(input_dict, fig_dir=None):
 \chapter{Material Take-off \& Quantity Summary}
 \label{ch:material-takeoff}
 
-\noindent\textbf{Table 7.1  Bill of Materials (Steel, Concrete, and Reinforcement Quantities)}
-
 \begingroup
 \compactcols
-\begin{longtable}{|C{1.0cm}|L{3.8cm}|C{2.6cm}|C{1.8cm}|C{1.8cm}|C{1.8cm}|C{1.8cm}|}
+\begin{longtable}{|C{0.9cm}|L{3.1cm}|C{2.6cm}|C{1.9cm}|C{1.8cm}|C{1.8cm}|C{1.8cm}|}
+\caption{\textbf{Bill of Materials (Steel, Concrete, and Reinforcement Quantities)}}
 \hline
 \textbf{S.N.} & \textbf{Item Description} & \textbf{Volume} & \textbf{Quantity} & \textbf{Total Volume} & \textbf{Weight (MT)} & \textbf{Total Weight (MT)} \\
 \hline

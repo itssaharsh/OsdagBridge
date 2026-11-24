@@ -3,6 +3,9 @@
 # Extracted from report_generator.py — DO NOT add business logic here.
 # =============================================================================
 from __future__ import annotations
+
+import logging
+import re
 from typing import TYPE_CHECKING
 
 from osdagbridge.core.utils.common import (
@@ -141,16 +144,41 @@ from osdagbridge.core.utils.common import (
     KEY_UTIL_SHEAR
 )
 
-import re
-
 from osdagbridge.core.reports.report_utils import _tex, _render_value, get_girder_entries, _fig_embed
 from osdagbridge.core.reports.report_charts import URPoint, element_summary_chart, tex_path, utilization_chart
-from osdagbridge.core.reports.styles import FIGURES
+from osdagbridge.core.reports.styles import FIGURES, status_cell, status_text_cell, ur_cell, warn_cell
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
+
+
+def _ur_charts(points, fig_dir):
+    """Section 5.5 UR charts as numbered figures; a chart that fails is left out and logged."""
+    parts = []
+    charts = [
+        (element_summary_chart, "fig:ur-governing",
+         r"Governing utilization ratio (UR = Demand / Capacity) of each primary element, from "
+         r"Table~\ref{tab:overall-summary}. The red dashed line marks UR = 1.0; bars above it fail."),
+        (utilization_chart, "fig:ur-by-check",
+         r"Utilization ratio of every check in Table~\ref{tab:overall-summary}, by element. Grey bars "
+         r"and ``n/a'' mark checks that are not available for this design; hatched bars are cut at the "
+         r"top of the axis and labelled with their real value."),
+    ]
+    for draw, label, caption in charts:
+        try:
+            path = draw(points, fig_dir)
+        except Exception as exc:  # a chart must never stop the report
+            logger.warning("UR chart %s left out: %s", label, exc)
+            continue
+        if path:
+            parts.append(_fig_embed(tex_path(path, fig_dir), caption, width=FIGURES["chart_width"],
+                                    label=label, numbered=True))
+    return "\n".join(parts)
+
+
 def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
-    """Chapter 5. When ``fig_dir`` is given, the Section 5.5 UR charts are drawn there and embedded."""
     """Chapter 5 — Design Checks.
 
     Parameters
@@ -159,6 +187,8 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
         Raw checks payload (currently unused; data is sourced from bridge).
     bridge : ReportDataBridge
         Provides input_dict, output_dict, and helper methods.
+    fig_dir : str, optional
+        Folder for the Section 5.5 UR charts; without it no chart is drawn.
     """
     girder_entries = get_girder_entries(bridge.input_dict)
     if not girder_entries:
@@ -223,7 +253,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
     try:
         _flex_ur = float(bridge.output_dict.get(KEY_UTIL_FLEXURE)) / 100.0
         _flex_ur_str = f"{_flex_ur:.2f}"
-        _flex_status = "PASS" if _flex_ur <= 1.0 else r"\statusfail{FAIL}"
+        _flex_status = status_cell(_flex_ur <= 1.0)
     except (TypeError, ValueError):
         _flex_ur_str = ""
         _flex_status = "---"
@@ -245,7 +275,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
     try:
         _shear_ur = float(bridge.output_dict.get(KEY_UTIL_SHEAR)) / 100.0
         _shear_ur_str = f"{_shear_ur:.2f}"
-        _shear_status = "PASS" if _shear_ur <= 1.0 else r"\statusfail{FAIL}"
+        _shear_status = status_cell(_shear_ur <= 1.0)
     except (TypeError, ValueError):
         _shear_ur_str = ""
         _shear_status = "---"
@@ -275,10 +305,10 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
     # Interaction DCRs use the engine bands: PASS <0.90, WARN <1.00, FAIL ≥1.00.
     def _interaction_status(ratio):
         if ratio < 0.90:
-            return "PASS"
+            return status_cell(True)
         elif ratio < 1.00:
-            return "WARN"
-        return r"\statusfail{FAIL}"
+            return warn_cell()
+        return status_cell(False)
     # M-V interaction UR stored as percent → show ratio (2 dp).
     try:
         _mv_ur = float(bridge.output_dict.get(KEY_UTIL_INTERACTION)) / 100.0
@@ -359,9 +389,9 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
     # Status: PASS when Provided ≥ Required.
     def _ge_status(provided, required):
         try:
-            return "PASS" if float(provided) >= float(required) else r"\statusfail{FAIL}"
+            return status_cell(float(provided) >= float(required))
         except (TypeError, ValueError):
-            return "---"
+            return status_cell(None)
     _iys_status = _ge_status(bridge.output_dict.get(KEY_SD_IS_IYS_PROV),
                              bridge.output_dict.get(KEY_SD_IS_IYS_MIN))
     _fqd_status = _ge_status(bridge.output_dict.get(KEY_SD_IS_FQD),
@@ -409,8 +439,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
             return ("N/A", "N/A", "N/A")
         req_s  = f"{_bs_r} kN"
         prov_s = f"{prov} kN"
-        status = "PASS" if float(prov) >= float(_bs_r) else r"\statusfail{FAIL}"
-        return (req_s, prov_s, status)
+        return (req_s, prov_s, status_cell(float(prov) >= float(_bs_r)))
     _wb_req, _wb_prov, _wb_st = _bs_check(KEY_SD_BS_FCDW_WB)
     _lc_req, _lc_prov, _lc_st = _bs_check(KEY_SD_BS_FCDW_LC)
     _ps_req, _ps_prov, _ps_st = _bs_check(KEY_SD_BS_FPSD)
@@ -439,9 +468,9 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
     def _defl_status(actual, allowable):
         """PASS / red FAIL for deflection; '---' when values are missing."""
         try:
-            return "PASS" if float(actual) <= float(allowable) else r"\statusfail{FAIL}"
+            return status_cell(float(actual) <= float(allowable))
         except (TypeError, ValueError):
-            return "---"
+            return status_cell(None)
 
     def _dfmt(v, nd=2):
         """Format a numeric value to nd decimal places; empty string when None."""
@@ -497,9 +526,9 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
 
     def _stress_status(actual, allow):
         try:
-            return "PASS" if float(actual) <= float(allow) else r"\statusfail{FAIL}"
+            return status_cell(float(actual) <= float(allow))
         except (TypeError, ValueError):
-            return "---"
+            return status_cell(None)
 
     _dr_511        = bridge.output_dict.get("design_results", {}) or {}
     _steel_sigma   = _dr_511.get(KEY_SD_STRESS_STEEL)
@@ -528,9 +557,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
                 .get(KEY_SD_ULS_PER_GIRDER, {}) or {}).get("fatigue", {}) or {}
 
     def _fat_status(s):
-        if s is None or str(s).strip() == "":
-            return "---"
-        return r"\statusfail{" + str(s) + "}" if "FAIL" in str(s).upper() else str(s)
+        return status_text_cell(s)
 
     t512_rows = []
     for _gi, (lbl, _) in enumerate(girder_entries, start=1):
@@ -585,7 +612,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
             lbl + r""" & """ + _tex(str(ctrl_lc)) + r""" & """ + _tex(str(ctrl.get("name", "")))
             + r""" & """ + _with_unit(ctrl.get("demand"),   ctrl.get("demand_unit"))
             + r""" & """ + _with_unit(ctrl.get("capacity"), ctrl.get("capacity_unit"))
-            + r""" & """ + _dfmt(ctrl.get("dcr"), nd=3)
+            + r""" & """ + ur_cell(ctrl.get("dcr"))
             + r""" & """ + _fat_status(ctrl.get("status")) + r""" \\[\rowpad]
 \hline"""
         )
@@ -601,7 +628,7 @@ def ch5_design_checks(checks_data, bridge, fig_dir=None) -> str:
         return (s + " kN") if s else ""
 
     t514_content = (
-        r"Design Resistance, $Q_u$ & \footnotesize\makecell{$Q_u=\min(Q_{u,s},\,Q_{u,c})$\\[3pt]$Q_{u,s}=\dfrac{0.8\,f_u\,(\pi d^2/4)}{\gamma_v}$\\[3pt]$Q_{u,c}=\dfrac{0.29\,\alpha\,d^2\sqrt{f_{ck}\,E_{cm}}}{\gamma_v}$} & "
+        r"Design Resistance, $Q_u$ & \formulafont\makecell{$Q_u=\min(Q_{u,s},\,Q_{u,c})$\\[\formulagap]$Q_{u,s}=\dfrac{0.8\,f_u\,(\pi d^2/4)}{\gamma_v}$\\[\formulagap]$Q_{u,c}=\dfrac{0.29\,\alpha\,d^2\sqrt{f_{ck}\,E_{cm}}}{\gamma_v}$} & "
         + _kn(_dr_sc.get(KEY_SD_SC_Qu_kN)) + r""" & IRC 22 Cl. 606.3.1 (Eq. 6.1) \\[\rowpad]
 \hline
 Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
@@ -658,7 +685,7 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
     else:
         _ts_ur_str = "---"
     _ts_ok = _dr_sc.get("transverse_shear_ok")
-    _ts_status = (r"\statusfail{FAIL}" if _ts_ok is False else "PASS") if _ts_ok is not None else "---"
+    _ts_status = status_cell(_ts_ok is not False) if _ts_ok is not None else status_cell(None)
 
     _ast_req  = _dr_sc.get("Ast_required_cm2_per_m")
     # Provided transverse steel = the deck's main (bottom + top) bars, which run
@@ -741,8 +768,7 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
     # Generate Table 5.20(b) rows
     def get_status_str(slnd_str, limit):
         try:
-            v = float(slnd_str)
-            return r"\statuspass{PASS}" if v <= limit else r"\statusfail{FAIL}"
+            return status_cell(float(slnd_str) <= limit)
         except (ValueError, TypeError):
             return ""
     cb_slenderness_rows = []
@@ -839,7 +865,7 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
 
     def _dks(ok):
         """PASS/FAIL status; '---' when deck design not run."""
-        return ("PASS" if ok else "FAIL") if _dk_has else "---"
+        return status_cell(bool(ok) if _dk_has else None)
 
     def _dkoh(key, nd=2, scale=1.0, unit=""):
         """Overhang value; 'N/A' when there is no overhang."""
@@ -878,12 +904,7 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
         return (s + " " + u) if u else s
 
     def _ur_522(v):
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return ""
-        s = f"{f:.2f}"
-        return (r"\statusfail{" + s + "}") if f > 1.0 else s
+        return ur_cell(v)
 
     def _lc_short(lc):
         # Show the full combination expression as-is, e.g.
@@ -1076,20 +1097,18 @@ Fatigue Shear Resistance, $Q_r$ & IRC 22 Table 8 ($\phi d$, $N_{sc}$) & """
     # Numbers for the Section 5.5 charts, read back from the UR column so the
     # chart always shows exactly what the table shows.
     def _ur_number(cell):
-        m = re.search(r"-?\d+(?:\.\d+)?", str(cell or ""))
-        return float(m.group(0)) if m and "---" not in str(cell) else None
+        text = str(cell or "")
+        if "---" in text:
+            return None
+        if "inf" in text.lower():  # zero capacity: drawn as a capped failing bar
+            return float("inf")
+        m = re.search(r"-?\d+(?:\.\d+)?", text)
+        return float(m.group(0)) if m else None
 
     _ur_points = [URPoint(el, short, _ur_number(cells[3])) for _label, el, short, cells in _summary_522]
     _ur_points += [URPoint("End Diaphragms", "Moment", _ur_number(_ed_moment_cells[3])),
                    URPoint("End Diaphragms", "Shear", _ur_number(_ed_shear_cells[3]))]
-    ur_charts_tex = ""
-    if fig_dir:
-        _gov_path = element_summary_chart(_ur_points, fig_dir)
-        _all_path = utilization_chart(_ur_points, fig_dir)
-        if _gov_path:
-            ur_charts_tex += _fig_embed(tex_path(_gov_path, fig_dir), r"Governing utilization ratio (UR = Demand / Capacity) of each primary element. The red dashed line marks UR = 1.0; bars above it fail.", width=FIGURES["chart_width"])
-        if _all_path:
-            ur_charts_tex += "\n" + _fig_embed(tex_path(_all_path, fig_dir), r"Utilization ratio of every check in Table 5.22, by element. Grey bars and ``n/a'' mark checks that are not available for this design.", width=FIGURES["chart_width"])
+    ur_charts_tex = _ur_charts(_ur_points, fig_dir) if fig_dir else ""
 
     t522_content = "\n".join(_t522)
 
@@ -1209,13 +1228,16 @@ This section presents all structural design checks performed by OsdagBridge. For
 
 \tablegap
 \smallgap
-\begin{longtable}{|C{1.6cm}|>{\centering\arraybackslash}p{3.6cm}|C{2.4cm}|C{2.0cm}|C{2.1cm}|C{1.7cm}|C{1.5cm}|}
+\begingroup
+\compactcols
+\begin{longtable}{|C{1.5cm}|>{\centering\arraybackslash}p{3.4cm}|C{2.6cm}|C{2.0cm}|C{2.1cm}|C{1.0cm}|C{1.4cm}|}
 \caption{\textbf{Girder Design Summary (DCR / Utilization Ratio)}}
 \hline
 \textbf{Girder} & \textbf{Controlling LC / Combination} & \textbf{Controlling Check} & \textbf{Demand} & \textbf{Capacity} & \textbf{UR} & \textbf{Status} \\[\rowpad]
 \hline
 """ + g_summary_table_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: UR = Demand / Capacity. A value $\leq 1.0$ indicates a passing check. The controlling check is the criterion with the highest UR for each girder, with the real load case/combination that drives it.}
 
 \tablegap
@@ -1230,9 +1252,8 @@ This section presents all structural design checks performed by OsdagBridge. For
 
 \tablegap
 
-\setlength\LTleft{0pt}
-\setlength\LTright{\fill}
-
+\begingroup
+\flushlefttables
 \begin{longtable}{|L{3.2cm}|>{\centering\arraybackslash}p{4.3cm}|>{\centering\arraybackslash}p{4.3cm}|C{2.0cm}|}
 \caption{\textbf{Shear Connector Spacing}}
 \hline
@@ -1240,6 +1261,7 @@ This section presents all structural design checks performed by OsdagBridge. For
 \hline
 """ + t515_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: IRC 22 Cl. 606.4, 606.9. Governing spacing $= \min(S_{L1}, S_{L2}, S_R)$.}
 
 \tablegap
@@ -1279,7 +1301,7 @@ The reinforced concrete deck slab is designed per IRC~112:2011 (flexure, shear, 
 \hline
 \textnormal{Tyre Contact Width (IRC 6 Annex~A)} & """ + _dkf(KEY_DD_TYRE_WIDTH, nd=0, scale=1000.0) + r""" mm (transverse) \\[\rowpad]
 \hline
-\textnormal{Impact Factor (IRC 6 Cl. 208.2)} & """ + _dkf(KEY_DD_IMPACT_FACTOR, nd=3) + r""" \\[\rowpad]
+\textnormal{Impact Factor (IRC 6 Cl. 208)} & """ + _dkf(KEY_DD_IMPACT_FACTOR, nd=3) + r""" \\[\rowpad]
 \hline
 \textnormal{Governing Live Load Case} & """ + _dkf(KEY_DD_VEHICLE) + r""" \\[\rowpad]
 \hline
@@ -1436,17 +1458,17 @@ Cross bracing between adjacent plate girders provides lateral stability during c
 
 \smallgap
 \noindent
+\begingroup
 \narrowcols
-\setlength\LTleft{0pt}
-\setlength\LTright{\fill}
-
-\begin{longtable}{|C{2.0cm}|L{2.0cm}|L{2.2cm}|C{2.5cm}|C{2.0cm}|C{2.0cm}|}
+\flushlefttables
+\begin{longtable}{|C{2.0cm}|L{2.4cm}|L{2.5cm}|C{2.6cm}|C{2.2cm}|C{2.2cm}|}
 \caption{\textbf{Cross Bracing --- Connection and Section Properties}}
 \hline
 \textbf{Panel} & \textbf{Member} & \textbf{Connection} & \textbf{Section} & \textbf{$A_g$ (mm²)} & \textbf{$r_{min}$ (mm)} \\[\rowpad]
 \hline
 """ + cb_forces_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: $A_g$ = gross cross-sectional area; $r_{min}$ = minimum radius of gyration.}
 
 \tablegap
@@ -1460,13 +1482,16 @@ Cross bracing between adjacent plate girders provides lateral stability during c
 \noindent\textit{Note:  3. Limit = 250 for compression members, 400 for tension members. $K = 1.0$ for members with both ends pinned.}
 
 \tablegap
-\begin{longtable}{|C{2.0cm}|L{1.8cm}|C{2.2cm}|C{3.0cm}|C{1.8cm}|C{1.8cm}|C{1.2cm}|C{1.8cm}|}
+\begingroup
+\compactcols
+\begin{longtable}{|C{1.4cm}|L{1.85cm}|C{1.9cm}|C{2.5cm}|C{1.85cm}|C{1.95cm}|C{1.0cm}|C{1.4cm}|}
 \caption{\textbf{Cross Bracing Design --- Capacity Summary}}
 \hline
 \textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Capacity (kN)} & \textbf{UR} & \textbf{Status} \\[\rowpad]
 \hline
 """ + cb_capacity_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: Designed per IS 800 Cl. 7 (compression) and Cl. 6 (tension). OsdagBridge cross-bracing module used.}
 
 % ===========================
@@ -1480,17 +1505,17 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 
 \smallgap
 \noindent
+\begingroup
 \narrowcols
-\setlength{\LTleft}{0pt}
-\setlength{\LTright}{\fill}
-
-\begin{longtable}{|C{2.0cm}|L{2.0cm}|L{2.2cm}|C{2.5cm}|C{2.0cm}|C{2.0cm}|}
+\flushlefttables
+\begin{longtable}{|C{2.0cm}|L{2.4cm}|L{2.5cm}|C{2.6cm}|C{2.2cm}|C{2.2cm}|}
 \caption{\textbf{End Diaphragm --- Connection and Section Properties}}
 \hline
 \textbf{Panel} & \textbf{Member} & \textbf{Connection} & \textbf{Section} & \textbf{$A_g$ (mm²)} & \textbf{$r_{min}$ (mm)} \\[\rowpad]
 \hline
 """ + cb_forces_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: $A_g$ = gross cross-sectional area; $r_{min}$ = minimum radius of gyration.}
 
 \tablegap
@@ -1504,14 +1529,16 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 \noindent\textit{Note:  3. Limit = 250 for compression members, 400 for tension members. $K = 1.0$ for members with both ends pinned.}
 
 \tablegap
-
-\begin{longtable}{|C{2.0cm}|L{1.8cm}|C{2.2cm}|C{3.0cm}|C{1.8cm}|C{1.8cm}|C{1.2cm}|C{1.8cm}|}
+\begingroup
+\compactcols
+\begin{longtable}{|C{1.4cm}|L{1.85cm}|C{1.9cm}|C{2.5cm}|C{1.85cm}|C{1.95cm}|C{1.0cm}|C{1.4cm}|}
 \caption{\textbf{End Diaphragm Design --- Capacity Summary}}
 \hline
 \textbf{Panel} & \textbf{Member} & \textbf{Section} & \textbf{Governing LC} & \textbf{Demand (kN)} & \textbf{Capacity (kN)} & \textbf{UR} & \textbf{Status} \\[\rowpad]
 \hline
 """ + cb_capacity_content + r"""
 \end{longtable}
+\endgroup
 \noindent\textit{Note: Designed per IS 800 Cl. 7 (compression) and Cl. 6 (tension). OsdagBridge cross-bracing module used.}
 
 % ===========================
@@ -1521,7 +1548,7 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 
 \tablegap
 \begin{longtable}{|C{3.4cm}|L{4.5cm}|C{2.3cm}|C{2.3cm}|>{\centering\arraybackslash}p{1.6cm}|}
-\caption{\textbf{Overall Design Check Summary --- All Members}}
+\caption{\textbf{Overall Design Check Summary --- All Members}}\label{tab:overall-summary}
 \hline
 \textbf{Member / Check} & \textbf{Governing Load Combo} & \textbf{Demand} & \textbf{Capacity} & \textbf{UR} \\[\rowpad]
 \hline

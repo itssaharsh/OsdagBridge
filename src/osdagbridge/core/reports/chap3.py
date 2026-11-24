@@ -4,8 +4,10 @@
 # =============================================================================
 
 from osdagbridge.core.utils.common import (
+    KEY_BL_IRC_CLASS_SV,
     KEY_CB_LOAD,
     KEY_LL_CUSTOM_VEHICLES,
+    KEY_LL_ECCENTRICITY,
     KEY_LL_FOOTPATH_PRESSURE_MODE,
     KEY_LL_FOOTPATH_PRESSURE_VALUE,
     KEY_LL_IRC_70R_BOGIE,
@@ -58,38 +60,7 @@ from osdagbridge.core.utils.common import (
 from osdagbridge.core.reports.report_utils import _tex, _render_value
 
 def ch3_loads(input_dict):
-    # Live load vehicle names mapping
-    vehicles = []
-    if input_dict.get(KEY_LL_IRC_CLASS_A):
-        vehicles.append("Class A")
-    if input_dict.get(KEY_LL_IRC_70R_WHEELED):
-        vehicles.append("Class 70R (Wheeled)")
-    if input_dict.get(KEY_LL_IRC_70R_TRACKED):
-        vehicles.append("Class 70R (Tracked)")
-    if input_dict.get(KEY_LL_IRC_AA_WHEELED):
-        vehicles.append("Class AA (Wheeled)")
-    if input_dict.get(KEY_LL_IRC_AA_TRACKED):
-        vehicles.append("Class AA (Tracked)")
-    if input_dict.get(KEY_LL_IRC_CLASS_SV):
-        vehicles.append("Class SV")
-    if input_dict.get(KEY_LL_IRC_70R_BOGIE):
-        vehicles.append("Class 70R (Bogie)")
-    if input_dict.get(KEY_LL_IRC_CLASS_FATIGUE):
-        vehicles.append("Class Fatigue")
-    
-    custom = input_dict.get(KEY_LL_CUSTOM_VEHICLES)
-    if custom and isinstance(custom, list):
-        for c in custom:
-            if isinstance(c, dict) and c.get('name'):
-                vehicles.append(c['name'])
-            elif isinstance(c, str):
-                vehicles.append(c)
-                
-
     from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
-
-    fp_mode  = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_MODE, "")
-    fp_value = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_VALUE, "")
 
     # Vz / Pz — prefer stored computed values; fall back to IRC6 Table 12
     vz_val = input_dict.get(KEY_WL_HOURLY_MEAN_WIND)
@@ -215,7 +186,10 @@ def ch3_loads(input_dict):
 
     lc_rows_str = "\n".join(lc_rows)
 
-    live_load_tables = _live_load_tables(input_dict, vehicles, fp_mode, fp_value)
+    live_load_tables = _live_load_tables(input_dict)
+
+    def _or_not_computed(text):
+        return text if text not in (None, "") else "Not computed"
 
     return r"""
 \chapter{Loads and Load Combinations}
@@ -226,7 +200,7 @@ This section summarizes all loads applied to the bridge and the load combination
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Dead Load -- Self Weight}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Steel Self-Weight Applied} & """ + (_render_value(input_dict, KEY_MATERIAL_GIRDER_DENSITY, ' kN/m\\textsuperscript{3}')) + r""" \\[\rowpad]
 \hline
@@ -240,7 +214,7 @@ This section summarizes all loads applied to the bridge and the load combination
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Dead Load for Surfacing (DW)}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Wearing Course Load} & """ + (_render_value(input_dict, KEY_WC_MATERIAL)) + r""" x """ + (_render_value(input_dict, KEY_WC_THICKNESS)) + r""" \\[\rowpad]
 \hline
@@ -257,7 +231,7 @@ This section summarizes all loads applied to the bridge and the load combination
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Wind Load (WL) --- per IRC 6}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Basic Wind Speed, Vb} & """ + (_render_value(input_dict,'wind_speed', ' m/s')) + r""" [from Project Location] \\[\rowpad]
 \hline
@@ -265,15 +239,15 @@ This section summarizes all loads applied to the bridge and the load combination
 \hline
 \textnormal{Average Exposed Height, H (m)} & """ + (_render_value(input_dict, KEY_WL_AVG_EXPOSED_HEIGHT, ' m')) + r""" \\[\rowpad]
 \hline
-\textnormal{Hourly Mean Wind Speed, Vz} & """ + (_render_value(input_dict, KEY_WL_HOURLY_MEAN_WIND, ' m/s')) + r""" \\[\rowpad]
+\textnormal{Hourly Mean Wind Speed, Vz} & """ + _or_not_computed(vz_str if vz_str != "N/A" else "") + r""" \\[\rowpad]
 \hline
-\textnormal{Hourly Wind Pressure, Pz} & """ + (_render_value(input_dict, KEY_WL_HOURLY_WIND_PRESSURE, ' N/m\\textsuperscript{2}')) + r""" \\[\rowpad]
+\textnormal{Hourly Wind Pressure, Pz} & """ + _or_not_computed(pz_str.replace("N/m²", r"N/m\textsuperscript{2}") if pz_str != "N/A" else "") + r""" \\[\rowpad]
 \hline
-\textnormal{Transverse Wind Force} & """ + (_render_value(input_dict, KEY_WL_TRANSVERSE_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
+\textnormal{Transverse Wind Force} & """ + _or_not_computed(_render_value(input_dict, KEY_WL_TRANSVERSE_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
 \hline
-\textnormal{Longitudinal Wind Force} & """ + (_render_value(input_dict, KEY_WL_LONGITUDINAL_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
+\textnormal{Longitudinal Wind Force} & """ + _or_not_computed(_render_value(input_dict, KEY_WL_LONGITUDINAL_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
 \hline
-\textnormal{Vertical Wind Force} & """ + (_render_value(input_dict, KEY_WL_VERTICAL_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
+\textnormal{Vertical Wind Force} & """ + _or_not_computed(_render_value(input_dict, KEY_WL_VERTICAL_WIND_FORCE, ' kN')) + r""" \\[\rowpad]
 \hline
 \end{longtable}
 
@@ -281,7 +255,7 @@ This section summarizes all loads applied to the bridge and the load combination
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Earthquake Load (EL) --- per IRC 6}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Seismic Zone} & """ + (_render_value(input_dict,'seismic_zone')) + r""" [from Project Location] \\[\rowpad]
 \hline
@@ -297,9 +271,9 @@ This section summarizes all loads applied to the bridge and the load combination
 \hline
 \textnormal{Vertical Seismic Coefficient, Av} & """ + (_render_value(input_dict, KEY_SL_VERTICAL_COEFF)) + r""" \\[\rowpad]
 \hline
-\textnormal{Horizontal Seismic Force (longitudinal)} & """ + '' + r""" kN \\[\rowpad]
+\textnormal{Horizontal Seismic Force (longitudinal)} & Not computed \\[\rowpad]
 \hline
-\textnormal{Horizontal Seismic Force (transverse)} & """ + '' + r""" kN \\[\rowpad]
+\textnormal{Horizontal Seismic Force (transverse)} & Not computed \\[\rowpad]
 \hline
 \end{longtable}
 
@@ -307,7 +281,7 @@ This section summarizes all loads applied to the bridge and the load combination
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Temperature Load (TL) --- per IRC 6}}
 \hline
-\textbf{parameter} & \textbf{value} \\
+\textbf{Parameter} & \textbf{Value} \\
 \hline
 \textnormal{Maximum Shade Temperature} & """ + (_render_value(input_dict,'shade_temp_max')) + r""" $^\circ$C \\[\rowpad]
 \hline
@@ -336,19 +310,51 @@ This section summarizes all loads applied to the bridge and the load combination
 # Vehicle live loads and the footway live load used to share one table. They
 # are now three tables: one row per vehicle selected in Additional Inputs >
 # Loading, the forces that come with the carriageway live load, and the
-# footway load, each with a unit column.
+# footway load, each with its unit.
 
+# The Loading tab's vehicle checkboxes, with the tab's labels and in its order
+# (ui_fields_additional_input.py, "Vehicles from IRC 6"):
+# (input key, label, wheeled/tracked, IRC 6 impact factor clause)
 _VEHICLE_KEYS = [
-    # (input key, vehicle class, wheeled/tracked, impact factor clause)
-    (KEY_LL_IRC_CLASS_A,       "Class A",             "Wheeled", "208.2"),
-    (KEY_LL_IRC_70R_WHEELED,   "Class 70R (Wheeled)", "Wheeled", "208.3"),
-    (KEY_LL_IRC_70R_TRACKED,   "Class 70R (Tracked)", "Tracked", "208.3"),
-    (KEY_LL_IRC_70R_BOGIE,     "Class 70R (Bogie)",   "Wheeled", "208.3"),
-    (KEY_LL_IRC_AA_WHEELED,    "Class AA (Wheeled)",  "Wheeled", "208.3"),
-    (KEY_LL_IRC_AA_TRACKED,    "Class AA (Tracked)",  "Tracked", "208.3"),
-    (KEY_LL_IRC_CLASS_SV,      "Special Vehicle (SV)", "Wheeled", None),
-    (KEY_LL_IRC_CLASS_FATIGUE, "Fatigue Vehicle",     "Wheeled", None),
+    (KEY_LL_IRC_CLASS_A,       "Class A",           "Wheeled", "208.2"),
+    (KEY_LL_IRC_AA_WHEELED,    "Class AA Wheeled",  "Wheeled", "208.3"),
+    (KEY_LL_IRC_AA_TRACKED,    "Class AA Tracked",  "Tracked", "208.3"),
+    (KEY_LL_IRC_70R_WHEELED,   "Class 70R Wheeled", "Wheeled", "208.3"),
+    (KEY_LL_IRC_70R_TRACKED,   "Class 70R Tracked", "Tracked", "208.3"),
+    (KEY_LL_IRC_70R_BOGIE,     "Class 70R Bogie",   "Wheeled", "208.3"),
+    (KEY_LL_IRC_CLASS_SV,      "Class SV",          "Wheeled", None),
+    (KEY_LL_IRC_CLASS_FATIGUE, "Class Fatigue",     "Wheeled", None),
 ]
+
+# Vehicles of the IRC 6 Table 6A combinations, which the grillage analysis
+# places on the carriageway (analyser.vehicle_lane_coordinates), by the
+# Loading-tab key of the same vehicle.
+_ANALYSIS_VEHICLES = {"ClassA": KEY_LL_IRC_CLASS_A, "Class70R": KEY_LL_IRC_70R_WHEELED}
+
+
+def _is_selected(input_dict, key):
+    """Loading-tab checkbox state, parsed like resolve_live_load_definitions().
+
+    True, or the strings "true" / "yes" / "1" / "checked" (any case), mean
+    selected; anything else (False, None, "False", "No", ...) does not.
+    """
+    raw = input_dict.get(key)
+    if raw is None:
+        return False
+    return raw is True or str(raw).strip().lower() in ("true", "yes", "1", "checked")
+
+
+def _custom_vehicle_names(input_dict):
+    """Names of user-defined vehicles (Additional Inputs > Loading, custom vehicles)."""
+    names = []
+    custom = input_dict.get(KEY_LL_CUSTOM_VEHICLES)
+    if isinstance(custom, list):
+        for item in custom:
+            if isinstance(item, dict) and item.get("name"):
+                names.append(str(item["name"]))
+            elif isinstance(item, str) and item.strip():
+                names.append(item.strip())
+    return names
 
 
 def _design_lanes(input_dict):
@@ -363,53 +369,139 @@ def _design_lanes(input_dict):
         return None
 
 
-def _live_load_tables(input_dict, vehicles, fp_mode, fp_value):
+def _analysis_impact_factor(span_m):
+    """1 + I that the grillage analysis applies to every vehicle load case.
+
+    Mirrors analyser.add_vehicle_load_cases_from_combinations():
+    dla = 1.0 + IRC6_2017.cl_208_3_impact_factor(L), called without the
+    vehicle type (the Cl. 208.3 rule for tracked vehicles).
+    """
+    from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
+    return 1.0 + IRC6_2017.cl_208_3_impact_factor(span_m)
+
+
+def _irc_impact_factor(span_m, clause, kind):
+    """1 + I per IRC 6 for the vehicle: Cl. 208.2 (Class A) or Cl. 208.3 by wheeled / tracked."""
+    from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
+    if clause == "208.2":
+        return 1.0 + IRC6_2017.cl_208_2_impact_factor(span_m)
+    return 1.0 + IRC6_2017.cl_208_3_impact_factor(span_m, tracked=(kind == "Tracked"))
+
+
+def _vehicle_table(input_dict, span_m):
+    """Rows and note of the vehicle live-load table (see _live_load_tables)."""
+    from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
+    try:
+        combos = IRC6_2017.table_6A(float(input_dict.get(KEY_CARRIAGEWAY_WIDTH)))["vehicle_combinations"]
+        in_analysis = {_ANALYSIS_VEHICLES[v] for combo in combos for v in combo if v in _ANALYSIS_VEHICLES}
+    except (TypeError, ValueError, KeyError):
+        in_analysis = set()
+    try:
+        applied = _analysis_impact_factor(span_m) if span_m is not None else None
+    except Exception:
+        applied = None
+
+    rows, differs = [], []
+    for key, name, kind, clause in _VEHICLE_KEYS:
+        if not _is_selected(input_dict, key):
+            continue
+        irc = None
+        if clause is not None and span_m is not None:
+            try:
+                irc = _irc_impact_factor(span_m, clause, kind)
+            except Exception:
+                irc = None
+        if key in in_analysis and applied is not None:
+            value, basis = f"{applied:.3f}", "Applied in the grillage analysis"
+            if irc is not None and abs(irc - applied) > 5e-4:
+                differs.append((name, clause, irc))
+        elif irc is not None:
+            value, basis = f"{irc:.3f}", f"IRC 6 Cl. {clause}"
+        else:
+            value, basis = "---", "Not computed by OsdagBridge"
+        rows.append(f"{_tex(name)} & {kind} & {value} & {basis} \\\\[\\rowpad]\n\\hline")
+    for name in _custom_vehicle_names(input_dict):
+        rows.append(f"{_tex(name)} (custom) & --- & --- & User-defined vehicle \\\\[\\rowpad]\n\\hline")
+    if not rows:
+        rows.append(r"\multicolumn{4}{|c|}{No vehicle selected in Additional Inputs $>$ Loading} \\[\rowpad]"
+                    "\n\\hline")
+
+    span_txt = f"{span_m:g}" if span_m is not None else "---"
+    note = (r"Vehicles as selected in Additional Inputs $>$ Loading; impact factors for a "
+            + span_txt + r" m span.")
+    if in_analysis and applied is not None:
+        loaded = [name for key, name, _k, _c in _VEHICLE_KEYS if key in in_analysis]
+        note += (" The grillage analysis loads the carriageway with the IRC 6 Table 6A vehicle "
+                 "combinations (" + ", ".join(loaded) + f") and applies $1 + I$ = {applied:.3f} to "
+                 r"every vehicle load case (IRC 6 Cl. 208.3, tracked-vehicle value); rows marked "
+                 r"``Applied in the grillage analysis'' show that factor.")
+    if differs:
+        parts = [f"{irc:.3f} for {_tex(name)} (Cl. {clause})" for name, clause, irc in differs]
+        note += (" For this span IRC 6 gives " + ", ".join(parts)
+                 + "; the analysis does not yet use the vehicle type.")
+    return rows, [note]
+
+
+def _braking_rows(input_dict):
+    """Braking rows of the 'Forces Associated with Vehicle Live Load' table."""
+    from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
+    any_vehicle = (any(_is_selected(input_dict, key) for key, *_ in _VEHICLE_KEYS)
+                   or bool(_custom_vehicle_names(input_dict)))
+    rows = []
+    if not any_vehicle:
+        rows.append(r"Braking force (longitudinal) & Not applied & kN & "
+                    r"No vehicle selected in Additional Inputs $>$ Loading \\[\rowpad]")
+    else:
+        lanes = _design_lanes(input_dict)
+        braking_kn = braking_t = None
+        if lanes:
+            try:
+                # cl_211_2_braking_force works in the code module's base unit (N).
+                from osdagbridge.core.utils.codes.keyfile import kN, t as tonne
+                braking_n = IRC6_2017.cl_211_2_braking_force(lanes)
+                braking_kn, braking_t = braking_n / kN, braking_n / tonne
+            except Exception:
+                pass
+        train = r"20\% of the Class A train"
+        if lanes and lanes > 2:
+            train += r" + 5\% of a Class 70R Wheeled train per lane beyond two"
+        if braking_kn is not None:
+            value = f"{braking_kn:.2f}"
+            basis = f"IRC 6 Cl. 211.2: {train}; {lanes} design lane(s) ({braking_t:.2f}~t)"
+        else:
+            value, basis = "---", f"IRC 6 Cl. 211.2: {train}"
+        rows.append(r"Braking force (longitudinal) & " + value + r" & kN & " + basis + r" \\[\rowpad]")
+    if KEY_BL_IRC_CLASS_SV in input_dict:
+        sv = "Selected" if _is_selected(input_dict, KEY_BL_IRC_CLASS_SV) else "Not selected"
+        rows.append(r"Braking from Class SV & " + sv + r" & --- & Option in Additional Inputs $>$ Loading; "
+                    r"the Class SV braking force is not computed by OsdagBridge \\[\rowpad]")
+    ecc = input_dict.get(KEY_LL_ECCENTRICITY)
+    if ecc not in (None, ""):
+        try:
+            ecc_txt = f"{float(ecc):g}"
+        except (TypeError, ValueError):
+            ecc_txt = _tex(ecc)
+        rows.append(r"Braking force eccentricity above the deck top & " + ecc_txt + r" & m & "
+                    r"Additional Inputs $>$ Loading (IRC 6 Cl. 211.3) \\[\rowpad]")
+    return rows
+
+
+def _live_load_tables(input_dict, fp_mode=None, fp_value=None):
     from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
 
+    if fp_mode is None:
+        fp_mode = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_MODE, "")
+    if fp_value is None:
+        fp_value = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_VALUE, "")
     try:
         span_m = float(input_dict.get(KEY_SPAN))
     except (TypeError, ValueError):
         span_m = None
 
-    def impact(clause, kind):
-        if span_m is None or clause is None:
-            return "---"
-        try:
-            if clause == "208.2":
-                factor = IRC6_2017.cl_208_2_impact_factor(span_m)
-            else:
-                # Wheeled and tracked vehicles have different factors under Cl. 208.3.
-                factor = IRC6_2017.cl_208_3_impact_factor(span_m, tracked=(kind == "Tracked"))
-            return f"{1.0 + factor:.3f}"
-        except Exception:
-            return "---"
-
-    vehicle_rows = []
-    for key, name, kind, clause in _VEHICLE_KEYS:
-        if not input_dict.get(key):
-            continue
-        basis = f"IRC 6 Cl. {clause}" if clause else "Not computed in the report"
-        vehicle_rows.append(f"{_tex(name)} & {kind} & {impact(clause, kind)} & {basis} \\\\[\\rowpad]\n\\hline")
-    standard = {name for _k, name, _kind, _c in _VEHICLE_KEYS}
-    for name in vehicles:
-        if name not in standard and not name.startswith("Class "):
-            vehicle_rows.append(f"{_tex(name)} (custom) & --- & --- & User-defined vehicle \\\\[\\rowpad]\n\\hline")
-    if not vehicle_rows:
-        vehicle_rows.append(r"\multicolumn{4}{|c|}{No vehicle selected in Additional Inputs $>$ Loading} \\[\rowpad]" + "\n\\hline")
-
-    lanes = _design_lanes(input_dict)
-    braking_kn = braking_t = None
-    if lanes:
-        try:
-            # cl_211_2_braking_force works in the code module's base unit (N).
-            from osdagbridge.core.utils.codes.keyfile import kN, t as tonne
-            braking_n = IRC6_2017.cl_211_2_braking_force(lanes)
-            braking_kn, braking_t = braking_n / kN, braking_n / tonne
-        except Exception:
-            pass
-    braking_value = f"{braking_kn:.2f}" if braking_kn is not None else "---"
-    braking_basis = (f"IRC 6 Cl. 211.2, {lanes} design lane(s), {braking_t:.2f} t"
-                     if braking_kn is not None else "IRC 6 Cl. 211.2")
+    vehicle_rows, vehicle_notes = _vehicle_table(input_dict, span_m)
+    force_rows = _braking_rows(input_dict) + [
+        r"Centrifugal force & Not applicable & kN & IRC 6 Cl. 212 applies only to horizontally curved "
+        r"bridges; OsdagBridge models straight spans \\[\rowpad]"]
 
     n_footpaths = input_dict.get(KEY_TS_NO_OF_FOOTPATHS) or 0
     try:
@@ -432,31 +524,30 @@ def _live_load_tables(input_dict, vehicles, fp_mode, fp_value):
         footway_rows = (f"Footpaths on the bridge & {n_footpaths} & --- & Typical section \\\\[\\rowpad]\n\\hline\n"
                         f"Footway live load & {pressure} & kN/m\\textsuperscript{{2}} & {basis} \\\\[\\rowpad]\n\\hline")
 
+    note_lines = "\n".join(r"\noindent\textit{Note: " + n + r"}\par" for n in vehicle_notes)
     return (r"""
-\begin{longtable}{|L{4.6cm}|C{2.2cm}|C{3.6cm}|L{5.0cm}|}
+\begin{longtable}{|L{4.0cm}|C{2.0cm}|C{2.6cm}|L{6.4cm}|}
 \caption{\textbf{Vehicle Live Loads (LL) --- per IRC 6}}
 \hline
 \textbf{Vehicle Class} & \textbf{Type} & \textbf{Impact Factor, $1 + I$ (--)} & \textbf{Basis} \\
 \hline
 """ + "\n".join(vehicle_rows) + r"""
 \end{longtable}
-\noindent\textit{Note: Vehicles as selected in Additional Inputs $>$ Loading. Impact factor for a """
-            + (f"{span_m:g}" if span_m is not None else "---") + r""" m span.}
+""" + note_lines + r"""
 
 \tablegap
-\begin{longtable}{|L{4.6cm}|C{2.2cm}|C{1.6cm}|L{7.2cm}|}
+\begin{longtable}{|L{4.0cm}|C{2.0cm}|C{1.4cm}|L{7.6cm}|}
 \caption{\textbf{Forces Associated with Vehicle Live Load}}
 \hline
 \textbf{Force} & \textbf{Value} & \textbf{Unit} & \textbf{Basis} \\
 \hline
-Braking force (longitudinal) & """ + braking_value + r""" & kN & """ + braking_basis + r""" \\[\rowpad]
-\hline
-Centrifugal force & Not applicable & kN & IRC 6 Cl. 212 applies only to horizontally curved bridges; OsdagBridge models straight spans \\[\rowpad]
+""" + "\n\\hline\n".join(force_rows) + r"""
 \hline
 \end{longtable}
+\noindent\textit{Note: The braking force is reported for information; the load combinations of this chapter do not include it.}
 
 \tablegap
-\begin{longtable}{|L{4.6cm}|C{2.2cm}|C{1.6cm}|L{7.2cm}|}
+\begin{longtable}{|L{4.0cm}|C{2.0cm}|C{1.4cm}|L{7.6cm}|}
 \caption{\textbf{Footway Live Load (Pedestrian)}}
 \hline
 \textbf{Parameter} & \textbf{Value} & \textbf{Unit} & \textbf{Basis} \\
