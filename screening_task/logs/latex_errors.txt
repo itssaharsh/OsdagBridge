@@ -1,0 +1,9 @@
+LaTeX error lines (lines starting with '!') in the pdflatex log
+before (dev d74f56d): 139
+after  (this branch): 0
+
+Distinct errors before:
+     46 ! Misplaced \omit.
+     46 ! Misplaced \noalign.
+     46 ! Extra alignment tab has been changed to \cr.
+      1 ! LaTeX Error: Unicode character ≤ (U+2264)

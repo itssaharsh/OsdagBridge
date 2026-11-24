@@ -1,0 +1,12 @@
+== Report_Before.pdf
+labels in footer: [(28, 'G4')]
+doubled heads: none
+orphaned heads: none
+== Report_After.pdf
+labels in footer: none
+doubled heads: none
+orphaned heads: none
+== Report_After_GUI.pdf
+labels in footer: none
+doubled heads: none
+orphaned heads: none
