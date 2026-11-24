@@ -22,6 +22,9 @@ def _tex(value):
                     ('~', r'\textasciitilde{}'), ('^', r'\^{}')]:
         s = s.replace(ch, esc)
     s = s.replace(':', r':\allowbreak{}')
+    # pdflatex cannot print these glyphs directly (they appear in check names).
+    for uni, math in [('≤', r'$\leq$'), ('≥', r'$\geq$')]:
+        s = s.replace(uni, math)
     return s
 
 
